@@ -1,171 +1,70 @@
 <?php
 
 require_once(__DIR__ . '/../../settings/connect_database.php');
+require_once(__DIR__ . '/../Contexts/UserContext.php');
 
 class UserController
 {
-    private $db;
+    private UserContext $ctx;
 
-    public function __construct($mysql_connection)
+    public function __construct(mysqli $db)
     {
-        $this->db = $mysql_connection;
+        $this->ctx = new UserContext($db);
     }
 
-    public function getUserById($id)
+    public function getUserById(int $id): ?array
     {
-        $stmt = $this->db->prepare("SELECT id, full_name, email, phone FROM clients WHERE id = ?");
-
-        $stmt->bind_param("i", $id);
-        $stmt->execute();
-
-        $result = $stmt->get_result();
-        return $result->fetch_assoc();
+        return $this->ctx->findById($id);
     }
 
-    public function getUserOrders($client_id)
+    public function getUserOrders(int $clientId): array
     {
-        $stmt = $this->db->prepare("
-            SELECT 
-                o.id,
-                o.order_datetime,
-                o.total_amount,
-                COUNT(oi.id) as items_count
-            FROM orders o
-            LEFT JOIN order_items oi ON o.id = oi.order_id
-            WHERE o.client_id = ?
-            GROUP BY o.id
-            ORDER BY o.order_datetime DESC
-        ");
-    
-        $stmt->bind_param("i", $client_id);
-        $stmt->execute();
-    
-        $result = $stmt->get_result();
-    
-        $orders = [];
-    
-        while ($row = $result->fetch_assoc()) {
-            $orders[] = $row;
-        }
-    
-        return $orders;
+        return $this->ctx->findOrdersByClientId($clientId);
     }
 
-    public function updateProfile($id, $full_name, $email, $phone, $password = null)
+    public function updateProfile(int $id, string $fullName, string $email,
+                                  string $phone, ?string $password = null): array
     {
-
-        if (empty($full_name)) {
-            return [
-                "success" => false,
-                "message" => "ФИО не может быть пустым"
-            ];
+        if (empty($fullName)) {
+            return ['success' => false, 'message' => 'ФИО не может быть пустым'];
         }
 
-        if (!empty($email)) {
-
-            $stmt = $this->db->prepare("
-                SELECT id FROM clients
-                WHERE email = ? AND id != ?
-            ");
-
-            $stmt->bind_param("si", $email, $id);
-            $stmt->execute();
-
-            if ($stmt->get_result()->num_rows > 0) {
-                return [
-                    "success" => false,
-                    "message" => "Этот email уже используется"
-                ];
-            }
+        if (!empty($email) && $this->ctx->emailExistsExcluding($email, $id)) {
+            return ['success' => false, 'message' => 'Этот email уже используется'];
         }
 
-        if (!empty($phone)) {
-
-            $stmt = $this->db->prepare("
-                SELECT id FROM clients
-                WHERE phone = ? AND id != ?
-            ");
-
-            $stmt->bind_param("si", $phone, $id);
-            $stmt->execute();
-
-            if ($stmt->get_result()->num_rows > 0) {
-                return [
-                    "success" => false,
-                    "message" => "Этот телефон уже используется"
-                ];
-            }
+        if (!empty($phone) && $this->ctx->phoneExistsExcluding($phone, $id)) {
+            return ['success' => false, 'message' => 'Этот телефон уже используется'];
         }
 
         if ($password) {
-
-            $password_hash = password_hash($password, PASSWORD_DEFAULT);
-
-            $stmt = $this->db->prepare("
-                UPDATE clients
-                SET full_name = ?, email = ?, phone = ?, password_hash = ?
-                WHERE id = ?
-            ");
-
-            $stmt->bind_param("ssssi", $full_name, $email, $phone, $password_hash, $id);
-
+            $ok = $this->ctx->updateWithPassword(
+                $id, $fullName, $email, $phone,
+                password_hash($password, PASSWORD_DEFAULT)
+            );
         } else {
-
-            $stmt = $this->db->prepare("
-                UPDATE clients
-                SET full_name = ?, email = ?, phone = ?
-                WHERE id = ?
-            ");
-
-            $stmt->bind_param("sssi", $full_name, $email, $phone, $id);
+            $ok = $this->ctx->updateWithoutPassword($id, $fullName, $email, $phone);
         }
 
-        if ($stmt->execute()) {
-
-            return [
-                "success" => true,
-                "message" => "Профиль успешно обновлён"
-            ];
-
-        }
-
-        return [
-            "success" => false,
-            "message" => "Ошибка обновления профиля"
-        ];
+        return $ok
+            ? ['success' => true,  'message' => 'Профиль успешно обновлён']
+            : ['success' => false, 'message' => 'Ошибка обновления профиля'];
     }
 
-    public function createUser($full_name, $email, $phone, $password)
+    public function createUser(string $fullName, string $email,
+                               string $phone, string $password): array
     {
-
-        if (empty($full_name) || empty($password)) {
-
-            return [
-                "success" => false,
-                "message" => "Введите имя и пароль"
-            ];
+        if (empty($fullName) || empty($password)) {
+            return ['success' => false, 'message' => 'Введите имя и пароль'];
         }
 
-        $password_hash = password_hash($password, PASSWORD_DEFAULT);
+        $ok = $this->ctx->insert(
+            $fullName, $email, $phone,
+            password_hash($password, PASSWORD_DEFAULT)
+        );
 
-        $stmt = $this->db->prepare("
-            INSERT INTO clients (full_name, email, phone, password_hash)
-            VALUES (?, ?, ?, ?)
-        ");
-
-        $stmt->bind_param("ssss", $full_name, $email, $phone, $password_hash);
-
-        if ($stmt->execute()) {
-
-            return [
-                "success" => true,
-                "message" => "Пользователь создан"
-            ];
-        }
-
-        return [
-            "success" => false,
-            "message" => "Ошибка создания пользователя"
-        ];
+        return $ok
+            ? ['success' => true,  'message' => 'Пользователь создан']
+            : ['success' => false, 'message' => 'Ошибка создания пользователя'];
     }
 }

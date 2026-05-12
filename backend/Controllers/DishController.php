@@ -2,89 +2,50 @@
 
 require_once(__DIR__ . '/../../settings/connect_database.php');
 require_once(__DIR__ . '/../Models/Dish.php');
+require_once(__DIR__ . '/../Contexts/DishContext.php');
 
 class DishController
 {
-    private $db;
+    private DishContext $ctx;
 
-    public function __construct($mysql_connection)
+    public function __construct(mysqli $db)
     {
-        $this->db = $mysql_connection;
+        $this->ctx = new DishContext($db);
     }
 
-    public function getAllDishes()
+    public function getAllDishes(): array
     {
-        $sql = "SELECT * FROM dishes WHERE availability = 1 ORDER BY name";
-        $result = $this->db->query($sql);
-
-        $dishes = [];
-
-        while ($row = $result->fetch_assoc()) {
-            $dishes[] = new Dish($row);
-        }
-
-        return $dishes;
+        return array_map(fn($row) => new Dish($row), $this->ctx->findAll());
     }
 
-    public function getDishById($id)
+    public function getDishById(int $id): ?Dish
     {
-        $stmt = $this->db->prepare("SELECT * FROM dishes WHERE id = ?");
-        $stmt->bind_param("i", $id);
-        $stmt->execute();
-
-        $result = $stmt->get_result();
-        $row = $result->fetch_assoc();
-
-        if ($row) {
-            return new Dish($row);
-        }
-
-        return null;
+        $row = $this->ctx->findById($id);
+        return $row ? new Dish($row) : null;
     }
 
-    public function createDish($name, $composition, $price, $description, $image)
+    public function createDish(string $name, string $composition, float $price,
+                               string $description, ?array $image): bool
     {
         $imagePath = null;
-
-        if ($image && $image["error"] === 0) {
-    
-            $uploadDir = __DIR__ . "/../../frontend/img/";
-            $fileName = time() . "_" . basename($image["name"]);
-            $targetFile = $uploadDir . $fileName;
-    
-            move_uploaded_file($image["tmp_name"], $targetFile);
-    
-            $imagePath = "img/" . $fileName;
+        if ($image && $image['error'] === 0) {
+            $uploadDir = __DIR__ . '/../../frontend/img/';
+            $fileName  = time() . '_' . basename($image['name']);
+            move_uploaded_file($image['tmp_name'], $uploadDir . $fileName);
+            $imagePath = 'img/' . $fileName;
         }
 
-        $stmt = $this->db->prepare("
-            INSERT INTO dishes (name, composition, price, description, image_path, availability, created_at)
-            VALUES (?, ?, ?, ?, ?, 1, NOW())
-        ");
-
-        $stmt->bind_param("ssdss", $name, $composition, $price, $description, $imagePath);
-
-        return $stmt->execute();
+        return $this->ctx->insert($name, $composition, $price, $description, $imagePath);
     }
 
-    public function updateDish($id, $name, $composition, $price, $description, $availability)
+    public function updateDish(int $id, string $name, string $composition, float $price,
+                               string $description, int $availability): bool
     {
-        $stmt = $this->db->prepare("
-            UPDATE dishes 
-            SET name=?, composition=?, price=?, description=?, availability=? 
-            WHERE id=?
-        ");
-
-        $stmt->bind_param("ssdssi", $name, $composition, $price, $description, $availability, $id);
-
-        return $stmt->execute();
+        return $this->ctx->update($id, $name, $composition, $price, $description, $availability);
     }
 
-    public function deleteDish($id)
+    public function deleteDish(int $id): bool
     {
-        $stmt = $this->db->prepare("DELETE FROM dishes WHERE id=?");
-        $stmt->bind_param("i", $id);
-
-        return $stmt->execute();
+        return $this->ctx->delete($id);
     }
 }

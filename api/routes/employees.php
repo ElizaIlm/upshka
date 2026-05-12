@@ -3,14 +3,16 @@
 addRoute('GET', '/employees', function ($params) {
     global $mysql_connection;
     Auth::requireAdmin();
+    require_once ROOT . '/backend/Contexts/EmployeeContext.php';
 
-    $result = $mysql_connection->query("SELECT id, full_name, login, role FROM employees ORDER BY full_name");
-    Response::json($result->fetch_all(MYSQLI_ASSOC));
+    $ctx = new EmployeeContext($mysql_connection);
+    Response::json($ctx->findAll());
 });
 
 addRoute('POST', '/employees', function ($params) {
     global $mysql_connection;
     Auth::requireAdmin();
+    require_once ROOT . '/backend/Contexts/EmployeeContext.php';
 
     $body      = json_decode(file_get_contents('php://input'), true) ?? [];
     $full_name = trim($body['full_name'] ?? '');
@@ -28,10 +30,8 @@ addRoute('POST', '/employees', function ($params) {
         return;
     }
 
-    $hash = password_hash($password, PASSWORD_DEFAULT);
-    $stmt = $mysql_connection->prepare("INSERT INTO employees (full_name, login, password_hash, role) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param('ssss', $full_name, $login, $hash, $role);
-    $ok = $stmt->execute();
+    $ctx = new EmployeeContext($mysql_connection);
+    $ok  = $ctx->insert($full_name, $login, password_hash($password, PASSWORD_DEFAULT), $role);
 
     Response::json(
         ['success' => $ok, 'message' => $ok ? 'Сотрудник создан' : 'Ошибка создания сотрудника'],
@@ -42,6 +42,7 @@ addRoute('POST', '/employees', function ($params) {
 addRoute('PUT', '/employees/{id}', function ($params) {
     global $mysql_connection;
     Auth::requireAdmin();
+    require_once ROOT . '/backend/Contexts/EmployeeContext.php';
 
     $body      = json_decode(file_get_contents('php://input'), true) ?? [];
     $full_name = trim($body['full_name'] ?? '');
@@ -52,10 +53,8 @@ addRoute('PUT', '/employees/{id}', function ($params) {
         return;
     }
 
-    $id   = (int)$params['id'];
-    $stmt = $mysql_connection->prepare("UPDATE employees SET full_name = ?, role = ? WHERE id = ?");
-    $stmt->bind_param('ssi', $full_name, $role, $id);
-    $ok = $stmt->execute();
+    $ctx = new EmployeeContext($mysql_connection);
+    $ok  = $ctx->update((int)$params['id'], $full_name, $role);
 
     Response::json(['success' => $ok, 'message' => $ok ? 'Сотрудник обновлён' : 'Ошибка обновления сотрудника']);
 });
@@ -63,11 +62,10 @@ addRoute('PUT', '/employees/{id}', function ($params) {
 addRoute('DELETE', '/employees/{id}', function ($params) {
     global $mysql_connection;
     Auth::requireAdmin();
+    require_once ROOT . '/backend/Contexts/EmployeeContext.php';
 
-    $id   = (int)$params['id'];
-    $stmt = $mysql_connection->prepare("DELETE FROM employees WHERE id = ?");
-    $stmt->bind_param('i', $id);
-    $ok = $stmt->execute();
+    $ctx = new EmployeeContext($mysql_connection);
+    $ok  = $ctx->delete((int)$params['id']);
 
     Response::json(['success' => $ok, 'message' => $ok ? 'Сотрудник удалён' : 'Ошибка удаления сотрудника']);
 });

@@ -3,9 +3,10 @@
 addRoute('GET', '/users', function ($params) {
     global $mysql_connection;
     Auth::requireAdmin();
+    require_once ROOT . '/backend/Contexts/UserContext.php';
 
-    $result  = $mysql_connection->query("SELECT id, full_name, email, phone, created_at FROM clients ORDER BY full_name");
-    Response::json($result->fetch_all(MYSQLI_ASSOC));
+    $ctx = new UserContext($mysql_connection);
+    Response::json($ctx->findAll());
 });
 
 addRoute('POST', '/users', function ($params) {
@@ -30,7 +31,6 @@ addRoute('GET', '/users/{id}', function ($params) {
     $auth = Auth::requireAuth();
     $id   = (int)$params['id'];
 
-    // Клиент может видеть только свой профиль
     if ($auth['type'] === 'client' && $auth['id'] !== $id) {
         Response::error('Доступ запрещён', 403);
         return;
@@ -53,7 +53,6 @@ addRoute('PUT', '/users/{id}', function ($params) {
     $auth = Auth::requireAuth();
     $id   = (int)$params['id'];
 
-    // Клиент может редактировать только свой профиль
     if ($auth['type'] === 'client' && $auth['id'] !== $id) {
         Response::error('Доступ запрещён', 403);
         return;
