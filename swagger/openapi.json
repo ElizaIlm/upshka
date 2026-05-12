@@ -1,0 +1,748 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Sushi Restaurant API",
+    "description": "REST API для управления суши-рестораном プレミアム寿司.\n\n## Аутентификация\nПосле вызова `POST /auth/login` вы получите поле `token`. Передавайте его в заголовке:\n```\nAuthorization: Bearer <token>\n```\n\n## Роли\n- **client** — зарегистрированный клиент\n- **waiter** — официант\n- **administrator** — администратор",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost/up_eliza/api",
+      "description": "Локальный сервер (OSPanel)"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Токен сессии, полученный при POST /auth/login"
+      }
+    },
+    "schemas": {
+      "Dish": {
+        "type": "object",
+        "properties": {
+          "id":           { "type": "integer", "example": 1 },
+          "name":         { "type": "string",  "example": "Филадельфия" },
+          "composition":  { "type": "string",  "example": "Лосось, сливочный сыр, огурец" },
+          "price":        { "type": "number",  "example": 420.00 },
+          "description":  { "type": "string",  "example": "Классический ролл" },
+          "image_path":   { "type": "string",  "nullable": true, "example": "img/1234_sushi.png" },
+          "availability": { "type": "boolean", "example": true },
+          "created_at":   { "type": "string",  "format": "date-time", "nullable": true }
+        }
+      },
+      "DishInput": {
+        "type": "object",
+        "required": ["name", "price"],
+        "properties": {
+          "name":         { "type": "string",  "example": "Унаги" },
+          "composition":  { "type": "string",  "example": "Угорь, рис, нори" },
+          "price":        { "type": "number",  "example": 550.00 },
+          "description":  { "type": "string",  "example": "Сладкий угорь" },
+          "availability": { "type": "integer", "enum": [0, 1], "example": 1 }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id":             { "type": "integer" },
+          "order_datetime": { "type": "string", "format": "date-time" },
+          "total_amount":   { "type": "number" },
+          "status":         { "type": "string", "enum": ["new", "preparing", "ready", "completed"] },
+          "client_name":    { "type": "string", "nullable": true },
+          "waiter_name":    { "type": "string", "nullable": true }
+        }
+      },
+      "OrderDetail": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Order" },
+          {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "dish_name":      { "type": "string" },
+                    "quantity":       { "type": "integer" },
+                    "price_at_order": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CartItem": {
+        "type": "object",
+        "required": ["dish_id", "qty", "price"],
+        "properties": {
+          "dish_id": { "type": "integer", "example": 3 },
+          "qty":     { "type": "integer", "example": 2 },
+          "price":   { "type": "number",  "example": 420.00 }
+        }
+      },
+      "WaiterCartItem": {
+        "type": "object",
+        "required": ["id", "qty", "price"],
+        "properties": {
+          "id":    { "type": "integer", "example": 3 },
+          "qty":   { "type": "integer", "example": 2 },
+          "price": { "type": "number",  "example": 420.00 }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id":        { "type": "integer" },
+          "full_name": { "type": "string"  },
+          "email":     { "type": "string"  },
+          "phone":     { "type": "string"  },
+          "created_at":{ "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "Employee": {
+        "type": "object",
+        "properties": {
+          "id":        { "type": "integer" },
+          "full_name": { "type": "string"  },
+          "login":     { "type": "string"  },
+          "role":      { "type": "string", "enum": ["administrator", "waiter"] }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        }
+      },
+      "SuccessMessage": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "message": { "type": "string"  }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Не авторизован",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Forbidden": {
+        "description": "Доступ запрещён",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "Ресурс не найден",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    }
+  },
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "tags": ["Аутентификация"],
+        "summary": "Вход в систему",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["login", "password"],
+                "properties": {
+                  "login":    { "type": "string", "example": "user@example.com" },
+                  "password": { "type": "string", "example": "secret123" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Успешный вход",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "token":   { "type": "string", "description": "Токен сессии для заголовка Authorization" },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id":   { "type": "integer" },
+                        "name": { "type": "string"  },
+                        "type": { "type": "string", "enum": ["client", "employee"] },
+                        "role": { "type": "string", "nullable": true }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": ["Аутентификация"],
+        "summary": "Регистрация клиента",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["full_name", "email", "phone", "password"],
+                "properties": {
+                  "full_name": { "type": "string", "example": "Иван Иванов" },
+                  "email":     { "type": "string", "example": "ivan@example.com" },
+                  "phone":     { "type": "string", "example": "+79001234567" },
+                  "password":  { "type": "string", "example": "secret123" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Регистрация успешна",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } }
+          },
+          "400": {
+            "description": "Ошибка регистрации",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Аутентификация"],
+        "summary": "Выход из системы",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Выход выполнен",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } }
+          }
+        }
+      }
+    },
+    "/dishes": {
+      "get": {
+        "tags": ["Блюда"],
+        "summary": "Список доступных блюд",
+        "responses": {
+          "200": {
+            "description": "Массив блюд",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Dish" } }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Блюда"],
+        "summary": "Создать блюдо (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  { "$ref": "#/components/schemas/DishInput" },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "image": { "type": "string", "format": "binary", "description": "Изображение блюда" }
+                    }
+                  }
+                ]
+              }
+            },
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DishInput" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Блюдо создано",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": {
+            "description": "Ошибка валидации",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/dishes/{id}": {
+      "get": {
+        "tags": ["Блюда"],
+        "summary": "Получить блюдо по ID",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "Блюдо",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dish" } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "tags": ["Блюда"],
+        "summary": "Обновить блюдо (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DishInput" } } }
+        },
+        "responses": {
+          "200": { "description": "Блюдо обновлено", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      },
+      "delete": {
+        "tags": ["Блюда"],
+        "summary": "Удалить блюдо (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Блюдо удалено", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/orders": {
+      "get": {
+        "tags": ["Заказы"],
+        "summary": "Список всех заказов (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Массив заказов",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      },
+      "post": {
+        "tags": ["Заказы"],
+        "summary": "Создать заказ от клиента",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["cart"],
+                "properties": {
+                  "cart": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/CartItem" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Заказ создан",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success":  { "type": "boolean" },
+                    "order_id": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "description": "Корзина пуста", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/orders/my": {
+      "get": {
+        "tags": ["Заказы"],
+        "summary": "Мои заказы (только клиент)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Заказы текущего клиента",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/orders/waiter": {
+      "post": {
+        "tags": ["Заказы"],
+        "summary": "Создать зальный заказ от официанта",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["cart"],
+                "properties": {
+                  "cart": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/WaiterCartItem" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Заказ создан",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success":  { "type": "boolean" },
+                    "order_id": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/orders/{id}": {
+      "get": {
+        "tags": ["Заказы"],
+        "summary": "Детали заказа с позициями",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "Детали заказа",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderDetail" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/orders/{id}/status": {
+      "patch": {
+        "tags": ["Заказы"],
+        "summary": "Обновить статус заказа (официант — только свои заказы)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["status"],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["new", "preparing", "ready", "completed"],
+                    "example": "preparing"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Статус обновлён", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "description": "Недопустимый статус", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": ["Клиенты"],
+        "summary": "Список клиентов (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Массив клиентов",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/User" } } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      },
+      "post": {
+        "tags": ["Клиенты"],
+        "summary": "Создать клиента (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["full_name", "password"],
+                "properties": {
+                  "full_name": { "type": "string", "example": "Иван Иванов" },
+                  "email":     { "type": "string", "example": "ivan@example.com" },
+                  "phone":     { "type": "string", "example": "+79001234567" },
+                  "password":  { "type": "string", "example": "secret123" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Клиент создан", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } } },
+          "400": { "description": "Ошибка", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/users/{id}": {
+      "get": {
+        "tags": ["Клиенты"],
+        "summary": "Профиль клиента (клиент — только свой, администратор — любой)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Профиль", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "tags": ["Клиенты"],
+        "summary": "Обновить профиль клиента (клиент — только свой, администратор — любой)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["full_name"],
+                "properties": {
+                  "full_name": { "type": "string" },
+                  "email":     { "type": "string" },
+                  "phone":     { "type": "string" },
+                  "password":  { "type": "string", "description": "Новый пароль (опционально)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Профиль обновлён", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } } },
+          "400": { "description": "Ошибка", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/employees": {
+      "get": {
+        "tags": ["Сотрудники"],
+        "summary": "Список сотрудников (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Массив сотрудников",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Employee" } } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      },
+      "post": {
+        "tags": ["Сотрудники"],
+        "summary": "Создать сотрудника (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["full_name", "login", "password"],
+                "properties": {
+                  "full_name": { "type": "string", "example": "Мария Сидорова" },
+                  "login":     { "type": "string", "example": "masha" },
+                  "password":  { "type": "string", "example": "secret123" },
+                  "role":      { "type": "string", "enum": ["administrator", "waiter"], "default": "waiter" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Сотрудник создан", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "description": "Ошибка валидации", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/employees/{id}": {
+      "put": {
+        "tags": ["Сотрудники"],
+        "summary": "Обновить сотрудника (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["full_name"],
+                "properties": {
+                  "full_name": { "type": "string" },
+                  "role":      { "type": "string", "enum": ["administrator", "waiter"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Сотрудник обновлён", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      },
+      "delete": {
+        "tags": ["Сотрудники"],
+        "summary": "Удалить сотрудника (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": { "description": "Сотрудник удалён", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessMessage" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/stats": {
+      "get": {
+        "tags": ["Статистика"],
+        "summary": "Сводка дашборда (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Статистика ресторана",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dishes_total":  { "type": "integer" },
+                    "orders_today":  { "type": "integer" },
+                    "orders_total":  { "type": "integer" },
+                    "clients_total": { "type": "integer" },
+                    "waiters_total": { "type": "integer" },
+                    "revenue_today": { "type": "number" },
+                    "revenue_month": { "type": "number" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/reports": {
+      "get": {
+        "tags": ["Статистика"],
+        "summary": "Детальный отчёт с топ-блюдами и лучшими официантами (только администратор)",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Отчёт",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revenue_today": { "type": "number" },
+                    "revenue_month": { "type": "number" },
+                    "orders_today":  { "type": "integer" },
+                    "orders_total":  { "type": "integer" },
+                    "top_dishes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name":  { "type": "string" },
+                          "total": { "type": "integer" }
+                        }
+                      }
+                    },
+                    "top_waiters": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "full_name":    { "type": "string" },
+                          "orders_count": { "type": "integer" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "Аутентификация", "description": "Вход, регистрация, выход" },
+    { "name": "Блюда",          "description": "CRUD блюд меню" },
+    { "name": "Заказы",         "description": "Создание и управление заказами" },
+    { "name": "Клиенты",        "description": "Управление профилями клиентов" },
+    { "name": "Сотрудники",     "description": "Управление персоналом" },
+    { "name": "Статистика",     "description": "Дашборд и отчёты" }
+  ]
+}
